@@ -5,7 +5,6 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
-
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
