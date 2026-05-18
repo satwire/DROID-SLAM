@@ -1,13 +1,15 @@
 import re
 import sys
+
 import numpy as np
+
 
 def extract_rmse_from_file(filepath):
     rmse_values = []
     # Regular expression to match 'rmse': <float>
-    rmse_pattern = re.compile(r'^\s*rmse\s+([0-9]+\.[0-9]+)')
+    rmse_pattern = re.compile(r"^\s*rmse\s+([0-9]+\.[0-9]+)")
 
-    with open(filepath, 'r') as file:
+    with open(filepath, "r") as file:
         for line in file:
             match = rmse_pattern.search(line)
             if match:

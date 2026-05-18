@@ -1,19 +1,16 @@
-import torch
-import lietorch
-import numpy as np
-
 import time
-from lietorch import SE3
-from droid_net import DroidNet
-from depth_video import DepthVideo
-from motion_filter import MotionFilter
-from droid_frontend import DroidFrontend
-from droid_backend import DroidAsyncBackend
-from trajectory_filler import PoseTrajectoryFiller
-from align import align_pose_fragements
-
 from collections import OrderedDict
+
+import torch
+from align import align_pose_fragments
+from depth_video import DepthVideo
+from droid_backend import DroidAsyncBackend
+from droid_frontend import DroidFrontend
+from droid_net import DroidNet
+from lietorch import SE3
+from motion_filter import MotionFilter
 from torch.multiprocessing import Process
+from trajectory_filler import PoseTrajectoryFiller
 
 
 def load_network(weights, device="cuda:0"):
@@ -76,7 +73,7 @@ def backend_process(args, depth_video1, depth_video2, device="cuda"):
 
                 if t0 > 0:
                     # align pose and scale
-                    dP, s = align_pose_fragements(
+                    dP, s = align_pose_fragments(
                         pose1_copy[t0 - 10 : t0 - 1],
                         depth_video2.poses[t0 - 10 : t0 - 1],
                     )

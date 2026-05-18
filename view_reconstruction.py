@@ -1,38 +1,36 @@
 import sys
-sys.path.append("droid_slam")
 
-import torch
+sys.path.append("droid_slam")
 import argparse
 
 import droid_backends
-import argparse
 import open3d as o3d
-
-from visualization import create_camera_actor
-from lietorch import SE3
-
+import torch
 from cuda_timer import CudaTimer
+from lietorch import SE3
+from visualization import create_camera_actor
 
-def view_reconstruction(filename: str, filter_thresh = 0.005, filter_count=2):
+
+def view_reconstruction(filename: str, filter_thresh=0.005, filter_count=2):
     reconstruction_blob = torch.load(filename)
-    images = reconstruction_blob["images"].cuda()[...,::2,::2]
-    disps = reconstruction_blob["disps"].cuda()[...,::2,::2]
+    images = reconstruction_blob["images"].cuda()[..., ::2, ::2]
+    disps = reconstruction_blob["disps"].cuda()[..., ::2, ::2]
     poses = reconstruction_blob["poses"].cuda()
     intrinsics = 4 * reconstruction_blob["intrinsics"].cuda()
 
     disps = disps.contiguous()
 
     index = torch.arange(len(images), device="cuda")
-    thresh = filter_thresh * torch.ones_like(disps.mean(dim=[1,2]))
+    thresh = filter_thresh * torch.ones_like(disps.mean(dim=[1, 2]))
 
     with CudaTimer("iproj"):
         points = droid_backends.iproj(SE3(poses).inv().data, disps, intrinsics[0])
-    colors = images[:,[2,1,0]].permute(0,2,3,1) / 255.0
+    colors = images[:, [2, 1, 0]].permute(0, 2, 3, 1) / 255.0
 
     with CudaTimer("filter"):
         counts = droid_backends.depth_filter(poses, disps, intrinsics[0], index, thresh)
 
-    mask = (counts >= filter_count) & (disps > .25 * disps.mean())
+    mask = (counts >= filter_count) & (disps > 0.25 * disps.mean())
     points_np = points[mask].cpu().numpy()
     colors_np = colors[mask].cpu().numpy()
 
@@ -59,7 +57,7 @@ def view_reconstruction(filename: str, filter_thresh = 0.005, filter_count=2):
     vis.destroy_window()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="path to image directory")
     parser.add_argument("--filter_threshold", type=float, default=0.005)
