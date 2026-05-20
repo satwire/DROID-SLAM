@@ -11,11 +11,11 @@ class DroidFrontend:
             video, net.update, max_factors=48, upsample=args.upsample
         )
 
-        # local optimization window
+        # Local optimization window.
         self.t0 = 0
         self.t1 = 0
 
-        # frontent variables
+        # Frontend variables.
         self.is_initialized = False
         self.count = 0
 
@@ -23,13 +23,37 @@ class DroidFrontend:
         self.iters1 = 8
         self.iters2 = 4
 
-        self.warmup = args.warmup
+        self.keyframe_removal_index = 3
+
+        self.warmup = max(4, args.warmup)
         self.beta = args.beta
         self.frontend_nms = args.frontend_nms
         self.keyframe_thresh = args.keyframe_thresh
         self.frontend_window = args.frontend_window
         self.frontend_thresh = args.frontend_thresh
         self.frontend_radius = args.frontend_radius
+
+        self.depth_window = 3
+
+        self.motion_damping = 0.0
+        if hasattr(args, "motion_damping"):
+            self.motion_damping = args.motion_damping
+
+    def __init_next_state(self):
+        # Set pose/depth for next iteration.
+        self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+
+        self.video.disps[self.t1] = torch.quantile(
+            self.video.disps[self.t1 - 3 : self.t1 - 1], 0.5
+        )
+
+        # Damped linear velocity model.
+        if self.motion_damping >= 0:
+            poses = SE3(self.video.poses)
+            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore[union-attr]
+            damped_vel = self.motion_damping * vel
+            next_pose = SE3.exp(damped_vel) * poses[self.t1 - 1]
+            self.video.poses[self.t1] = next_pose.data  # type: ignore[union-attr]
 
     def __update(self):
         """add edges, perform update"""
@@ -55,29 +79,26 @@ class DroidFrontend:
             self.video.disps[self.t1 - 1],
         )
 
-        for itr in range(self.iters1):
+        for _ in range(self.iters1):
             self.graph.update(
                 None, None, use_inactive=True, viz_itr=None, use_mono=True
             )
 
-        # set initial pose for next frame
-        poses = SE3(self.video.poses)
+        # Set initial pose for next frame.
         d = self.video.distance(
             [self.t1 - 3], [self.t1 - 2], beta=self.beta, bidirectional=True
         )
 
         if d.item() < self.keyframe_thresh:
             self.graph.rm_keyframe(self.t1 - 2)
-
             with self.video.get_lock():
                 self.video.counter.value -= 1
                 self.t1 -= 1
-
         else:
             for itr in range(self.iters2):
                 self.graph.update(None, None, use_inactive=True)
 
-        # set pose for next itration
+        # Set pose for next iteration.
         self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
         self.video.disps[self.t1] = self.video.disps[self.t1 - 1].mean()
 
@@ -108,14 +129,11 @@ class DroidFrontend:
                 1, use_inactive=True, use_mono=True, motion_only=False, viz_itr=None
             )
 
-        # print("error ", error)
-        # breakpoint()
-
         # self.video.normalize()
         self.video.poses[self.t1] = self.video.poses[self.t1 - 1].clone()
         self.video.disps[self.t1] = self.video.disps[self.t1 - 4 : self.t1].mean()
 
-        # initialization complete
+        # Initialization complete.
         self.is_initialized = True
         self.last_pose = self.video.poses[self.t1 - 1].clone()
         self.last_disp = self.video.disps[self.t1 - 1].clone()
@@ -129,13 +147,15 @@ class DroidFrontend:
 
     def __call__(self, final_=False):
         """main update"""
-        if not self.is_initialized and final_ == True:
+        if not self.is_initialized and final_:
             self.__initialize()
 
         # do initialization
         if not self.is_initialized and self.video.counter.value == self.warmup:
             self.__initialize()
+            self.__init_next_state()
 
         # do update
         elif self.is_initialized and self.t1 < self.video.counter.value:
             self.__update()
+            self.__init_next_state()
