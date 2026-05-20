@@ -6,11 +6,14 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 ROOT = osp.dirname(osp.abspath(__file__))
 
 setup(
-    name="droid_backends",
+    name="droid_slam",
+    version="0.1",
+    packages=["lietorch"],
+    package_dir={"": "thirdparty/lietorch"},
     ext_modules=[
         CUDAExtension(
             "droid_backends",
-            include_dirs=[osp.join(ROOT, "thirdparty/eigen")],
+            include_dirs=[osp.join(ROOT, "thirdparty/lietorch/eigen")],
             sources=[
                 "src/droid.cpp",
                 "src/droid_kernels.cu",
@@ -30,22 +33,11 @@ setup(
                 ],
             },
         ),
-    ],
-    cmdclass={"build_ext": BuildExtension},
-)
-
-setup(
-    name="lietorch",
-    version="0.2",
-    description="Lie Groups for PyTorch",
-    packages=["lietorch"],
-    package_dir={"": "thirdparty/lietorch"},
-    ext_modules=[
         CUDAExtension(
             "lietorch_backends",
             include_dirs=[
                 osp.join(ROOT, "thirdparty/lietorch/lietorch/include"),
-                osp.join(ROOT, "thirdparty/eigen"),
+                osp.join(ROOT, "thirdparty/lietorch/eigen"),
             ],
             sources=[
                 "thirdparty/lietorch/lietorch/src/lietorch.cpp",

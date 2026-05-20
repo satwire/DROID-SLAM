@@ -1,0 +1,14 @@
+name: research_droid
+channels:
+  - nvidia/label/cuda-11.8.0
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - cuda-toolkit=11.8
+  - gcc_linux-64=11
+  - gxx_linux-64=11
+  - make
+  - cmake
+  - ninja
+  - pip

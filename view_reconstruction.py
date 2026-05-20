@@ -38,7 +38,7 @@ def view_reconstruction(filename: str, filter_thresh=0.005, filter_count=2):
     point_cloud.points = o3d.utility.Vector3dVector(points_np)
     point_cloud.colors = o3d.utility.Vector3dVector(colors_np)
 
-    vis = o3d.visualization.Visualizer()
+    vis = o3d.visualization.Visualizer()  # type: ignore
     vis.create_window(height=960, width=960)
     vis.get_render_option().load_from_json("misc/renderoption.json")
 
