@@ -57,21 +57,55 @@ class Droid:
         self.net.load_state_dict(state_dict, strict=True)
         self.net.to("cuda:0").eval()
 
-    def track(self, tstamp, image, depth=None, intrinsics=None, mask=None):
-        """main thread - update map"""
+    def track(
+        self,
+        tstamp,
+        image,
+        depth=None,
+        intrinsics=None,
+        mask=None,
+        imu_delta_pose=None,
+        imu_confidence=1.0,
+    ):
+        """main thread - update map
 
+        imu_delta_pose: lietorch SE3 of shape (1, 7) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
+        imu_confidence: float in [0, 1]. <0.1 disables the prior for this frame.
+        """
         with torch.no_grad():
+            # Stash IMU delta on the frontend so _init_next_state can read it.
+            self.frontend.imu_delta_pose = imu_delta_pose
+            self.frontend.imu_confidence = imu_confidence
+
             # check there is enough motion
             self.filterx.track(tstamp, image, depth, intrinsics, mask)
+
             # local bundle adjustment
             self.frontend()
 
-    def track_final(self, tstamp, image, depth=None, intrinsics=None, mask=None):
-        """main thread - update map"""
-        # breakpoint()
+    def track_final(
+        self,
+        tstamp,
+        image,
+        depth=None,
+        intrinsics=None,
+        mask=None,
+        imu_delta_pose=None,
+        imu_confidence=1.0,
+    ):
+        """main thread - update map
+
+        imu_delta_pose: lietorch SE3 of shape (1, 7) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
+        imu_confidence: float in [0, 1]. <0.1 disables the prior for this frame.
+        """
         with torch.no_grad():
+            # Stash IMU delta on the frontend so _init_next_state can read it.
+            self.frontend.imu_delta_pose = imu_delta_pose
+            self.frontend.imu_confidence = imu_confidence
+
             # check there is enough motion
             self.filterx.track(tstamp, image, depth, intrinsics, mask, last_frame=True)
+
             # local bundle adjustment
             self.frontend(final_=True)
 
@@ -98,7 +132,7 @@ class Droid:
             median_stats, _ = self.backend(
                 10, opt_intr=False, use_mono=True, alpha=alpha_base, ret_hessian=True
             )
-            median_hessian, median_calib = median_stats
+            median_hessian, median_calib = median_stats  # type: ignore
             print("median_hessian, median_calib ", median_hessian, median_calib)
 
         # we cannot observe focal length parameters

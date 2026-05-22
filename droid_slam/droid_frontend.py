@@ -39,21 +39,37 @@ class DroidFrontend:
         if hasattr(args, "motion_damping"):
             self.motion_damping = args.motion_damping
 
-    def __init_next_state(self):
-        # Set pose/depth for next iteration.
-        self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+        self.imu_delta_pose = None
+        self.imu_confidence = 0.0
 
+    def __init_next_state(self):
         self.video.disps[self.t1] = torch.quantile(
             self.video.disps[self.t1 - 3 : self.t1 - 1], 0.5
         )
 
-        # Damped linear velocity model.
-        if self.motion_damping >= 0:
+        # Pose prediction. Priority: IMU prior > damped velocity > constant pose.
+        use_imu = (
+            self.imu_delta_pose is not None
+            and self.imu_confidence > 0.1
+            and self.t1 >= 1
+        )
+
+        if use_imu:
             poses = SE3(self.video.poses)
-            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore[union-attr]
+            delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
+            next_pose = delta * poses[self.t1 - 1]
+            self.video.poses[self.t1] = next_pose.data
+        elif self.motion_damping >= 0 and self.t1 >= 2:
+            poses = SE3(self.video.poses)
+            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore
             damped_vel = self.motion_damping * vel
             next_pose = SE3.exp(damped_vel) * poses[self.t1 - 1]
-            self.video.poses[self.t1] = next_pose.data  # type: ignore[union-attr]
+            self.video.poses[self.t1] = next_pose.data  # type: ignore
+        else:
+            self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+
+        self.imu_delta_pose = None
+        self.imu_confidence = 0.0
 
     def __update(self):
         """add edges, perform update"""
