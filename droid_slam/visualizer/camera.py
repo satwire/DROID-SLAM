@@ -1,10 +1,8 @@
-import time
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import glm
-from glm import cos, radians, sin
-
 import moderngl_window
+from glm import cos, radians, sin
 from moderngl_window.scene.camera import Camera
 
 
@@ -40,8 +38,8 @@ class OrbitCamera(Camera):
 
     def rot_state(self, dx: float, dy: float) -> None:
         """Unclamped, continuous orbit around the target."""
-        self.angle_x = (self.angle_x - dx * self.mouse_sensitivity / 10.0)
-        self.angle_y = (self.angle_y - dy * self.mouse_sensitivity / 10.0)
+        self.angle_x = self.angle_x - dx * self.mouse_sensitivity / 10.0
+        self.angle_y = self.angle_y - dy * self.mouse_sensitivity / 10.0
         self.angle_y = max(min(self.angle_y, -5.0), -175.0)
         # self.angle_y = self.angle_y.clamp()
 
@@ -51,9 +49,15 @@ class OrbitCamera(Camera):
     @property
     def matrix(self) -> glm.mat4:
         # compute camera position as before
-        px = cos(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius + self.target.x
+        px = (
+            cos(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius
+            + self.target.x
+        )
         py = cos(radians(self.angle_y)) * self.radius + self.target.y
-        pz = sin(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius + self.target.z
+        pz = (
+            sin(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius
+            + self.target.z
+        )
         pos = glm.vec3(px, py, pz)
         self.set_position(*pos)
         return glm.lookAt(pos, self.target, self.world_up)
@@ -61,20 +65,25 @@ class OrbitCamera(Camera):
     def pan_state(self, dx: float, dy: float) -> None:
         """Pan the orbit‐center using camera‐relative axes."""
         # Recompute camera position & forward vector
-        px = cos(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius + self.target.x
+        px = (
+            cos(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius
+            + self.target.x
+        )
         py = cos(radians(self.angle_y)) * self.radius + self.target.y
-        pz = sin(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius + self.target.z
+        pz = (
+            sin(radians(self.angle_x)) * sin(radians(self.angle_y)) * self.radius
+            + self.target.z
+        )
         pos = glm.vec3(px, py, pz)
         forward = glm.normalize(self.target - pos)
 
         # Build a stable right & up in camera‐space:
         right = glm.normalize(glm.cross(forward, self.world_up))
-        up    = glm.normalize(glm.cross(right, forward))
+        up = glm.normalize(glm.cross(right, forward))
 
         # Screen‐space offset: right = +dx, up = +dy
         offset = (-right * dx + up * dy) * self._pan_sensitivity * self.radius
         self.target += offset
-
 
 
 class OrbitDragCameraWindow(moderngl_window.WindowConfig):
@@ -96,14 +105,13 @@ class OrbitDragCameraWindow(moderngl_window.WindowConfig):
 
     def on_mouse_drag_event(self, x: int, y: int, dx: float, dy: float):
         mb = self.wnd.mouse_states
-        if mb.right:                         # ← right‑button drag → pan
+        if mb.right:  # ← right‑button drag → pan
             self.camera.pan_state(dx, dy)
-        else:                                # ← left‑button drag → orbit
+        else:  # ← left‑button drag → orbit
             self.camera.rot_state(dx, dy)
-    
+
     def on_mouse_scroll_event(self, x_offset: float, y_offset: float):
         self.camera.zoom_state(y_offset)
 
     def on_resize(self, width: int, height: int):
         self.camera.projection.update(aspect_ratio=self.wnd.aspect_ratio)
-

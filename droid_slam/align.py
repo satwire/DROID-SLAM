@@ -1,5 +1,6 @@
 from lietorch import SE3
 
+
 def align_pose_fragements(pose0, pose1):
     P0 = SE3(pose0.clone())
     P1 = SE3(pose1.clone())

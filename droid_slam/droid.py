@@ -1,16 +1,13 @@
-import torch
-import lietorch
-import numpy as np
-
-from droid_net import DroidNet
-from depth_video import DepthVideo
-from motion_filter import MotionFilter
-from droid_frontend import DroidFrontend
-from droid_backend import DroidBackend
-from trajectory_filler import PoseTrajectoryFiller
-
 from collections import OrderedDict
+
+import torch
+from depth_video import DepthVideo
+from droid_backend import DroidBackend
+from droid_frontend import DroidFrontend
+from droid_net import DroidNet
+from motion_filter import MotionFilter
 from torch.multiprocessing import Process
+from trajectory_filler import PoseTrajectoryFiller
 
 
 class Droid:
@@ -28,27 +25,28 @@ class Droid:
 
         # frontend process
         self.frontend = DroidFrontend(self.net, self.video, self.args)
-        
+
         # backend process
         self.backend = DroidBackend(self.net, self.video, self.args)
 
         # visualizer
         if not self.disable_vis:
             from visualizer.droid_visualizer import visualization_fn
+
             self.visualizer = Process(target=visualization_fn, args=(self.video, None))
             self.visualizer.start()
 
         # post processor - fill in poses for non-keyframes
         self.traj_filler = PoseTrajectoryFiller(self.net, self.video)
 
-
     def load_weights(self, weights):
-        """ load trained model weights """
+        """load trained model weights"""
 
         print(weights)
         self.net = DroidNet()
-        state_dict = OrderedDict([
-            (k.replace("module.", ""), v) for (k, v) in torch.load(weights).items()])
+        state_dict = OrderedDict(
+            [(k.replace("module.", ""), v) for (k, v) in torch.load(weights).items()]
+        )
 
         state_dict["update.weight.2.weight"] = state_dict["update.weight.2.weight"][:2]
         state_dict["update.weight.2.bias"] = state_dict["update.weight.2.bias"][:2]
@@ -59,7 +57,7 @@ class Droid:
         self.net.to("cuda:0").eval()
 
     def track(self, tstamp, image, depth=None, intrinsics=None):
-        """ main thread - update map """
+        """main thread - update map"""
 
         with torch.no_grad():
             # check there is enough motion
@@ -69,7 +67,7 @@ class Droid:
             self.frontend()
 
     def terminate(self, stream=None):
-        """ terminate the visualization process, return poses [t, q] """
+        """terminate the visualization process, return poses [t, q]"""
 
         del self.frontend
 
@@ -83,4 +81,3 @@ class Droid:
 
         camera_trajectory = self.traj_filler(stream)
         return camera_trajectory.inv().data.cpu().numpy()
-

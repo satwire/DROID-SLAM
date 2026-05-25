@@ -1,16 +1,13 @@
-import moderngl
-import numpy as np
-from lietorch import SE3
-
-import torch
 import droid_backends
-import moderngl_window
 import moderngl
+import moderngl_window
+import numpy as np
+import torch
+from align import align_pose_fragements
+from lietorch import SE3
 from moderngl_window.opengl.vao import VAO
 
-import numpy as np
 from .camera import OrbitDragCameraWindow
-from align import align_pose_fragements
 
 CAM_POINTS = 0.05 * np.array(
     [
@@ -42,21 +39,21 @@ def merge_depths_and_poses(depth_video1, depth_video2):
     t1 = depth_video1.counter.value
     t2 = depth_video2.counter.value
 
-    poses1 = depth_video1.poses[:max(t1, t2)].clone()
-    poses2 = depth_video2.poses[:max(t1, t2)].clone()
+    poses1 = depth_video1.poses[: max(t1, t2)].clone()
+    poses2 = depth_video2.poses[: max(t1, t2)].clone()
 
-    disps1 = depth_video1.disps[:max(t1, t2)].clone()
-    disps2 = depth_video2.disps[:max(t1, t2)].clone()
+    disps1 = depth_video1.disps[: max(t1, t2)].clone()
+    disps2 = depth_video2.disps[: max(t1, t2)].clone()
 
     if t2 <= 0:
         return poses1, disps1
-    
+
     if t2 >= t1:
         return poses2, disps2
-    
+
     dP, s = align_pose_fragements(
-        poses1[max(0, t2-16): t2],
-        poses2[max(0, t2-16): t2],
+        poses1[max(0, t2 - 16) : t2],
+        poses2[max(0, t2 - 16) : t2],
     )
 
     poses1[..., :3] *= s
@@ -162,7 +159,6 @@ class DroidVisualizer(OrbitDragCameraWindow):
         cam_segments = CAM_SEGMENTS.astype("f4")
         cam_segments = np.tile(cam_segments, (n, 1))
 
-
         self.count = 0
 
         # Create a vertex array manually
@@ -206,7 +202,9 @@ class DroidVisualizer(OrbitDragCameraWindow):
             intrinsics = self._depth_video1.intrinsics
 
             if self._depth_video2 is not None:
-                poses, disps = merge_depths_and_poses(self._depth_video1, self._depth_video2)
+                poses, disps = merge_depths_and_poses(
+                    self._depth_video1, self._depth_video2
+                )
                 poses = poses[:t]
                 disps = disps[:t]
             else:

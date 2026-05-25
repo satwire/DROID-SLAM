@@ -1,14 +1,9 @@
 import torch
-import lietorch
-import numpy as np
-
-from lietorch import SE3
 from factor_graph import FactorGraph
-
-from cuda_timer import CudaTimer
-
+from lietorch import SE3
 
 ENABLE_TIMING = False
+
 
 class DroidFrontend:
     def __init__(self, net, video, args):
@@ -105,7 +100,6 @@ class DroidFrontend:
         else:
             for itr in range(self.iters2):
                 self.graph.update(None, None, use_inactive=True)
-
 
         # set pose for next itration
         self.video.poses[self.t1] = self.video.poses[self.t1 - 1]

@@ -1,6 +1,4 @@
 import torch
-import torch.nn.functional as F
-
 from lietorch import SE3, Sim3
 
 MIN_DEPTH = 0.2
@@ -207,7 +205,7 @@ def induced_flow(poses, disps, intrinsics, ii, jj):
         torch.arange(wd, device=disps.device, dtype=torch.float),
         indexing="ij",
     )
-    
+
     coords0 = torch.stack([x, y], dim=-1)
     coords1, valid = projective_transform(poses, disps, intrinsics, ii, jj, False)
 

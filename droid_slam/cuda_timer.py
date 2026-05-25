@@ -1,5 +1,6 @@
 import torch
 
+
 class CudaTimer:
     def __init__(self, name, enabled=True):
         self.name = name
@@ -12,7 +13,7 @@ class CudaTimer:
     def __enter__(self):
         if self.enabled:
             self.start.record()
-        
+
     def __exit__(self, type, value, traceback):
         global all_times
         if self.enabled:
