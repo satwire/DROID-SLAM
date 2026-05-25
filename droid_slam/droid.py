@@ -69,7 +69,7 @@ class Droid:
     ):
         """main thread - update map
 
-        imu_delta_pose: lietorch SE3 of shape (1, 7) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
+        imu_delta_pose: lietorch SE3, scalar-batch (shape (7,)) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
         imu_confidence: float in [0, 1]. <0.1 disables the prior for this frame.
         """
         with torch.no_grad():
@@ -95,7 +95,7 @@ class Droid:
     ):
         """main thread - update map
 
-        imu_delta_pose: lietorch SE3 of shape (1, 7) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
+        imu_delta_pose: lietorch SE3, scalar-batch (shape (7,)) — delta from frame t-1 to t. Layout: [tx, ty, tz, qx, qy, qz, qw]
         imu_confidence: float in [0, 1]. <0.1 disables the prior for this frame.
         """
         with torch.no_grad():

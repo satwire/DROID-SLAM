@@ -144,7 +144,7 @@ class PoseTrajectoryFiller:
         # self.video_full = copy.deepcopy(self.video)
         # First perform PGO over non-key frames
         # but keep track of all its entries so that we can do full BA later
-        for tstamp, image, depth, _, mask in image_stream:
+        for tstamp, image, depth, _, mask, _, _ in image_stream:
             intrinsic = self.video.intrinsics[0] * 8.0  # HARCODE!!
 
             tstamps.append(tstamp)

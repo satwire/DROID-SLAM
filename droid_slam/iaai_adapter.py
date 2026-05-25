@@ -21,7 +21,10 @@ class IAAIAdapter:
         self.residuals: torch.Tensor = (
             torch.load(path / "residuals.pt").to(device).float()
         )
-        self.residuals = self.residuals[: self.trans.shape[0]]
+        assert self.residuals.shape[0] == self.trans.shape[0], (
+            f"IAAI residuals length ({self.residuals.shape[0]}) must match "
+            f"deltas length ({self.trans.shape[0]}). Did upstream trimming change?"
+        )
         self.num_deltas = self.trans.shape[0]
         self.device = device
 
