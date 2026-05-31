@@ -3,7 +3,7 @@ import sys
 sys.path.append("droid_slam")
 import argparse
 
-import droid_backends
+import droid_backends_alt as droid_backends
 import open3d as o3d
 import torch
 from cuda_timer import CudaTimer

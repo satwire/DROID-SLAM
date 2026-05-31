@@ -6,10 +6,10 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 ROOT = osp.dirname(osp.abspath(__file__))
 
 setup(
-    name="droid_backends",
+    name="droid_backends_alt",
     ext_modules=[
         CUDAExtension(
-            "droid_backends",
+            "droid_backends_alt",
             include_dirs=[osp.join(ROOT, "thirdparty/lietorch/eigen")],
             sources=[
                 "src/droid.cpp",

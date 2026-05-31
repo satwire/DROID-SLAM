@@ -1,4 +1,4 @@
-import droid_backends
+import droid_backends_alt as droid_backends
 import torch
 import torch.nn.functional as F
 

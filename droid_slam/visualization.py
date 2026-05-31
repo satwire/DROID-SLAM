@@ -1,5 +1,5 @@
 import cv2
-import droid_backends
+import droid_backends_alt as droid_backends
 import numpy as np
 import open3d as o3d
 import torch
