@@ -25,7 +25,7 @@ class PoseTrajectoryFiller:
             :, None, None
         ]
 
-    @torch.cuda.amp.autocast(enabled=True)
+    @torch.autocast("cuda", enabled=True)
     def __feature_encoder(self, image):
         """features for correlation volume"""
         return self.fnet(image)

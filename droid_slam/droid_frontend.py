@@ -1,10 +1,12 @@
+import time
+
 import torch
 from factor_graph import FactorGraph
 from lietorch import SE3
 
 
 class DroidFrontend:
-    def __init__(self, net, video, args):
+    def __init__(self, net, video, args, timing=None):
         self.video = video
         self.update_op = net.update
         self.graph = FactorGraph(
@@ -42,7 +44,12 @@ class DroidFrontend:
         self.imu_delta_pose = None
         self.imu_confidence = 0.0
 
+        self.timing = timing
+
     def __init_next_state(self):
+        # DEBUG: count init_next_state invocations.
+        self._init_calls = getattr(self, "_init_calls", 0) + 1
+
         self.video.disps[self.t1] = torch.quantile(
             self.video.disps[self.t1 - 3 : self.t1 - 1], 0.5
         )
@@ -55,6 +62,9 @@ class DroidFrontend:
         )
 
         if use_imu:
+            # DEBUG: count IMU branch hits.
+            self._imu_hits = getattr(self, "_imu_hits", 0) + 1
+
             poses = SE3(self.video.poses)
             delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
             next_pose = delta * poses[self.t1 - 1]
@@ -164,14 +174,32 @@ class DroidFrontend:
     def __call__(self, final_=False):
         """main update"""
         if not self.is_initialized and final_:
+            t0 = time.perf_counter()
             self.__initialize()
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("frontend_initialize", time.perf_counter() - t0)
 
         # do initialization
         if not self.is_initialized and self.video.counter.value == self.warmup:
+            t0 = time.perf_counter()
             self.__initialize()
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("frontend_initialize", time.perf_counter() - t0)
+            t0 = time.perf_counter()
             self.__init_next_state()
+            if self.timing is not None:
+                self.timing.record("frontend_init_next_state", time.perf_counter() - t0)
 
         # do update
         elif self.is_initialized and self.t1 < self.video.counter.value:
+            t0 = time.perf_counter()
             self.__update()
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("frontend_update", time.perf_counter() - t0)
+            t0 = time.perf_counter()
             self.__init_next_state()
+            if self.timing is not None:
+                self.timing.record("frontend_init_next_state", time.perf_counter() - t0)

@@ -42,6 +42,22 @@ class IAAIAdapter:
             f"{n_full} frames @ conf=1.0, {n_zero} @ conf=0.0"
         )
 
+        # DEBUG: report delta magnitudes so we can tell if priors have enough
+        # signal to move the BA away from constant-velocity init.
+        t_norms = self.trans.norm(dim=-1)
+        traces = self.rots.diagonal(dim1=-2, dim2=-1).sum(dim=-1)
+        cos_angles = ((traces - 1.0) / 2.0).clamp(-1.0, 1.0)
+        r_angles_deg = torch.rad2deg(torch.acos(cos_angles))
+        print(
+            f"IAAI delta magnitudes — "
+            f"|t|: p50={t_norms.median().item():.4f}m, "
+            f"p95={t_norms.quantile(0.95).item():.4f}m, "
+            f"max={t_norms.max().item():.4f}m; "
+            f"|θ|: p50={r_angles_deg.median().item():.2f}°, "
+            f"p95={r_angles_deg.quantile(0.95).item():.2f}°, "
+            f"max={r_angles_deg.max().item():.2f}°"
+        )
+
     def _confidence(self, residual) -> float:
         if residual <= self.r_full:
             return 1.0

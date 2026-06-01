@@ -8,12 +8,14 @@ from droid_backend import DroidBackend
 from droid_frontend import DroidFrontend
 from droid_net import DroidNet
 from motion_filter import MotionFilter
+from timing_stats import TimingStats
 from trajectory_filler import PoseTrajectoryFiller
 
 
 class Droid:
-    def __init__(self, args):
+    def __init__(self, args, timing: TimingStats | None = None):
         super(Droid, self).__init__()
+        self.timing = timing if timing is not None else TimingStats()
         self.load_weights(args.weights)
         self.args = args
         self.disable_vis = args.disable_vis
@@ -22,10 +24,14 @@ class Droid:
         self.video = DepthVideo(args.image_size, args.buffer, stereo=args.stereo)
 
         # filter incoming frames so that there is enough motion
-        self.filterx = MotionFilter(self.net, self.video, thresh=args.filter_thresh)
+        self.filterx = MotionFilter(
+            self.net, self.video, thresh=args.filter_thresh, timing=self.timing
+        )
 
         # frontend process
-        self.frontend = DroidFrontend(self.net, self.video, self.args)
+        self.frontend = DroidFrontend(
+            self.net, self.video, self.args, timing=self.timing
+        )
 
         # backend process
         self.backend = DroidBackend(self.net, self.video, self.args)
@@ -77,11 +83,26 @@ class Droid:
             self.frontend.imu_delta_pose = imu_delta_pose
             self.frontend.imu_confidence = imu_confidence
 
+            # DEBUG: count IMU stash calls.
+            if not hasattr(self, "_imu_stats"):
+                self._imu_stats = {"n_calls": 0, "n_usable": 0}
+            self._imu_stats["n_calls"] += 1
+            if imu_delta_pose is not None and imu_confidence > 0.1:
+                self._imu_stats["n_usable"] += 1
+
             # check there is enough motion
+            torch.cuda.synchronize()
+            self.timing.start("motion_filter")
             self.filterx.track(tstamp, image, depth, intrinsics, mask)
+            torch.cuda.synchronize()
+            self.timing.stop("motion_filter")
 
             # local bundle adjustment
+            torch.cuda.synchronize()
+            self.timing.start("frontend")
             self.frontend()
+            torch.cuda.synchronize()
+            self.timing.stop("frontend")
 
     def track_final(
         self,
@@ -103,11 +124,26 @@ class Droid:
             self.frontend.imu_delta_pose = imu_delta_pose
             self.frontend.imu_confidence = imu_confidence
 
+            # DEBUG: count IMU stash calls.
+            if not hasattr(self, "_imu_stats"):
+                self._imu_stats = {"n_calls": 0, "n_usable": 0}
+            self._imu_stats["n_calls"] += 1
+            if imu_delta_pose is not None and imu_confidence > 0.1:
+                self._imu_stats["n_usable"] += 1
+
             # check there is enough motion
+            torch.cuda.synchronize()
+            self.timing.start("motion_filter")
             self.filterx.track(tstamp, image, depth, intrinsics, mask, last_frame=True)
+            torch.cuda.synchronize()
+            self.timing.stop("motion_filter")
 
             # local bundle adjustment
+            torch.cuda.synchronize()
+            self.timing.start("frontend")
             self.frontend(final_=True)
+            torch.cuda.synchronize()
+            self.timing.stop("frontend")
 
     def terminate(
         self,
@@ -129,9 +165,13 @@ class Droid:
         alpha_base = 1e-5
 
         if not benchmark:
+            torch.cuda.synchronize()
+            self.timing.start("backend_probe")
             median_stats, _ = self.backend(
                 10, opt_intr=False, use_mono=True, alpha=alpha_base, ret_hessian=True
             )
+            torch.cuda.synchronize()
+            self.timing.stop("backend_probe")
             median_hessian, median_calib = median_stats  # type: ignore
             print("median_hessian, median_calib ", median_hessian, median_calib)
 
@@ -159,6 +199,8 @@ class Droid:
         self.video.poses = prev_poses.clone()
         self.video.disps = prev_disps.clone()
         self.video.intrinsics = prev_intrinsics.clone()
+        torch.cuda.synchronize()
+        self.timing.start("backend_keyframe_ba")
         self.backend(
             20,
             opt_intr=_opt_intr,
@@ -166,12 +208,20 @@ class Droid:
             alpha=alpha,
             ret_hessian=False,
         )
+        torch.cuda.synchronize()
+        self.timing.stop("backend_keyframe_ba")
 
+        torch.cuda.synchronize()
+        self.timing.start("traj_filler")
         camera_trajectory = self.traj_filler(stream)
+        torch.cuda.synchronize()
+        self.timing.stop("traj_filler")
 
         if full_ba:
             print("\nGLOBAL FRAME BA " + "#" * 32, " use_mono ", use_mono)
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            self.timing.start("backend_global_ba")
             _, mot_prob = self.backend(
                 15,
                 opt_intr=False,
@@ -180,6 +230,8 @@ class Droid:
                 ret_hessian=False,
                 ret_mask=True,
             )
+            torch.cuda.synchronize()
+            self.timing.stop("backend_global_ba")
 
             opt_disps = self.video.disps[: self.video.counter.value, ...]
             full_ba_trajectory = lietorch.SE3(
