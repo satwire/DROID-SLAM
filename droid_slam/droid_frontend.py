@@ -67,7 +67,10 @@ class DroidFrontend:
 
             poses = SE3(self.video.poses)
             delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
-            next_pose = delta * poses[self.t1 - 1]
+            # IAAI stores the delta with inverse-frame convention relative to
+            # DROID (the rotation matrix expresses pose[t-1] in frame t, not
+            # frame t in frame t-1). Invert before forward-composing.
+            next_pose = delta.inv() * poses[self.t1 - 1]
             self.video.poses[self.t1] = next_pose.data
         elif self.motion_damping >= 0 and self.t1 >= 2:
             poses = SE3(self.video.poses)
