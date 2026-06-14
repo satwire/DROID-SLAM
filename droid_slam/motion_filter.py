@@ -1,3 +1,4 @@
+import time
 from functools import partial
 
 import geom.projective_ops as pops
@@ -14,7 +15,7 @@ else:
 class MotionFilter:
     """This class is used to filter incoming frames and extract features"""
 
-    def __init__(self, net, video, thresh=2.5, device="cuda"):
+    def __init__(self, net, video, thresh=2.5, device="cuda", timing=None):
 
         # split net modules
         self.cnet = net.cnet
@@ -24,6 +25,7 @@ class MotionFilter:
         self.video = video
         self.thresh = thresh
         self.device = device
+        self.timing = timing
 
         self.count = 0
 
@@ -64,11 +66,19 @@ class MotionFilter:
         inputs = inputs.sub_(self.MEAN).div_(self.STDV)
 
         # extract features
+        t0 = time.perf_counter()
         gmap = self.__feature_encoder(inputs)
+        if self.timing is not None:
+            torch.cuda.synchronize()
+            self.timing.record("mf_feature_encoder", time.perf_counter() - t0)
 
         ### always add first frame to the depth video ###
         if self.video.counter.value == 0:
+            t0 = time.perf_counter()
             net, inp = self.__context_encoder(inputs[:, [0]])
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("mf_context_encoder", time.perf_counter() - t0)
             self.net, self.inp, self.fmap = net, inp, gmap
             self.video.append(
                 tstamp,
@@ -89,12 +99,20 @@ class MotionFilter:
             corr = CorrBlock(self.fmap[None, [0]], gmap[None, [0]])(coords0)
 
             # approximate flow magnitude using 1 update iteration
+            t0 = time.perf_counter()
             _, delta, weight = self.update(self.net[None], self.inp[None], corr)
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("mf_update_op", time.perf_counter() - t0)
 
-            # check motion magnitue / add new frame to video
+            # check motion magnitude / add new frame to video
             if delta.norm(dim=-1).mean().item() > self.thresh:
                 self.count = 0
+                t0 = time.perf_counter()
                 net, inp = self.__context_encoder(inputs[:, [0]])
+                if self.timing is not None:
+                    torch.cuda.synchronize()
+                    self.timing.record("mf_context_encoder", time.perf_counter() - t0)
                 self.net, self.inp, self.fmap = net, inp, gmap
                 self.video.append(
                     tstamp,

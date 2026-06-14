@@ -1,23 +1,24 @@
+import time
+
 import torch
 from factor_graph import FactorGraph
 from lietorch import SE3
 
-ENABLE_TIMING = False
-
 
 class DroidFrontend:
-    def __init__(self, net, video, args):
+    def __init__(self, net, video, args, timing=None):
         self.video = video
         self.update_op = net.update
         self.graph = FactorGraph(
             video, net.update, max_factors=48, upsample=args.upsample
         )
+        self.timing = timing
 
-        # local optimization window
+        # Local optimization window.
         self.t0 = 0
         self.t1 = 0
 
-        # frontent variables
+        # Frontend variables
         self.is_initialized = False
         self.count = 0
 
@@ -41,21 +42,47 @@ class DroidFrontend:
         if hasattr(args, "motion_damping"):
             self.motion_damping = args.motion_damping
 
+        self.imu_delta_pose = None
+        self.imu_confidence = 0.0
+
     def _init_next_state(self):
-        # set pose / depth for next iteration
-        self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+        # DEBUG: count init_next_state invocations.
+        self._init_calls = getattr(self, "_init_calls", 0) + 1
 
         self.video.disps[self.t1] = torch.quantile(
             self.video.disps[self.t1 - 3 : self.t1 - 1], 0.5
         )
 
-        # damped linear velocity model
-        if self.motion_damping >= 0:
+        # Pose prediction. Priority: IMU prior > damped velocity > constant pose.
+        use_imu = (
+            self.imu_delta_pose is not None
+            and self.imu_confidence > 0.1
+            and self.t1 >= 1
+        )
+
+        if use_imu:
+            # DEBUG: count IMU branch hits.
+            self._imu_hits = getattr(self, "_imu_hits", 0) + 1
+
             poses = SE3(self.video.poses)
-            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()
+            delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
+            # IAAI stores the delta with inverse-frame convention relative to
+            # DROID (the rotation matrix expresses pose[t-1] in frame t, not
+            # frame t in frame t-1). Invert before forward-composing.
+            next_pose = delta.inv() * poses[self.t1 - 1]
+            self.video.poses[self.t1] = next_pose.data
+        elif self.motion_damping >= 0 and self.t1 >= 2:
+            poses = SE3(self.video.poses)
+            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore
             damped_vel = self.motion_damping * vel
             next_pose = SE3.exp(damped_vel) * poses[self.t1 - 1]
-            self.video.poses[self.t1] = next_pose.data
+            self.video.poses[self.t1] = next_pose.data  # type: ignore
+        else:
+            self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+
+        # Consume the stashed prior to prevent stale reuse on the next call.
+        self.imu_delta_pose = None
+        self.imu_confidence = 0.0
 
     def _update(self):
         """add edges, perform update"""
@@ -149,10 +176,24 @@ class DroidFrontend:
 
         # do initialization
         if not self.is_initialized and self.video.counter.value == self.warmup:
+            t0 = time.perf_counter()
             self._initialize()
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("frontend_initialize", time.perf_counter() - t0)
+            t0 = time.perf_counter()
             self._init_next_state()
+            if self.timing is not None:
+                self.timing.record("frontend_init_next_state", time.perf_counter() - t0)
 
         # do update
         elif self.is_initialized and self.t1 < self.video.counter.value:
+            t0 = time.perf_counter()
             self._update()
+            if self.timing is not None:
+                torch.cuda.synchronize()
+                self.timing.record("frontend_update", time.perf_counter() - t0)
+            t0 = time.perf_counter()
             self._init_next_state()
+            if self.timing is not None:
+                self.timing.record("frontend_init_next_state", time.perf_counter() - t0)
