@@ -12,6 +12,7 @@ class IAAIAdapter:
         r_full_pct=0.50,
         r_zero_pct=0.95,
         device="cuda",
+        trans_scale: float = 1.0,
     ) -> None:
         path = Path(iaai_disambiguation_dir)
         self.trans: torch.Tensor = (
@@ -27,6 +28,7 @@ class IAAIAdapter:
         )
         self.num_deltas = self.trans.shape[0]
         self.device = device
+        self.trans_scale = float(trans_scale)
 
         self.r_full = float(self.residuals.quantile(r_full_pct))
         self.r_zero = float(self.residuals.quantile(r_zero_pct))
@@ -57,6 +59,12 @@ class IAAIAdapter:
             f"p95={r_angles_deg.quantile(0.95).item():.2f}°, "
             f"max={r_angles_deg.max().item():.2f}°"
         )
+        if self.trans_scale != 1.0:
+            print(
+                f"IAAI translation scale correction active: "
+                f"trans_scale={self.trans_scale:.4f} (applied to deltas, "
+                f"rotation untouched)"
+            )
 
     def _confidence(self, residual) -> float:
         if residual <= self.r_full:
@@ -71,7 +79,9 @@ class IAAIAdapter:
             return None, 0.0
 
         R = self.rots[i]
-        t = self.trans[i]
+        # Scale-correction ablation: bring IAAI's monocular-depth translation
+        # magnitude onto DROID's metric scale. trans_scale=1.0 is a no-op.
+        t = self.trans[i] * self.trans_scale
         q_xyzw = roma.rotmat_to_unitquat(R)
         delta_pose = SE3(torch.cat([t, q_xyzw]))
 
