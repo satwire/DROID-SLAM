@@ -73,16 +73,43 @@ class IAAIAdapter:
             return 0.0
         return float((self.r_zero - residual) / (self.r_zero - self.r_full))
 
-    def get_delta(self, frame_idx):
-        i = frame_idx - 1
-        if i < 0 or i >= self.num_deltas:
+    def _step_se3(self, i: int) -> SE3:
+        """Single stored delta i (motion frame i -> i+1) as a scalar-batch SE3.
+
+        Scale-correction ablation: bring IAAI's monocular-depth translation
+        magnitude onto DROID's metric scale. trans_scale=1.0 is a no-op.
+        """
+        t = self.trans[i] * self.trans_scale
+        q_xyzw = roma.rotmat_to_unitquat(self.rots[i])
+        return SE3(torch.cat([t, q_xyzw]))
+
+    def get_composed_delta(self, kf_idx, frame_idx):
+        """IAAI prior for a keyframe gap, composed across any dropped frames.
+
+        Under MegaSAM's default motion-keyframing the previous keyframe may sit
+        several input frames behind the current one. `kf_idx` is the previous
+        keyframe's input-frame index and `frame_idx` the current frame. Stored
+        delta[i] is the motion (frame i -> i+1), so the gap composes stored
+        indices [kf_idx, ..., frame_idx-1] left-to-right; the frontend then
+        applies `composed.inv() * pose[prev_kf]`. With kf_idx == frame_idx-1
+        (no frames dropped) this is exactly the single-step delta.
+
+        Confidence is the min over the gap — one low-confidence frame taints the
+        whole composition, so we'd rather fall back to constant/damped init.
+        """
+        lo, hi = kf_idx, frame_idx
+        if lo < 0 or hi > self.num_deltas or hi <= lo:
             return None, 0.0
 
-        R = self.rots[i]
-        # Scale-correction ablation: bring IAAI's monocular-depth translation
-        # magnitude onto DROID's metric scale. trans_scale=1.0 is a no-op.
-        t = self.trans[i] * self.trans_scale
-        q_xyzw = roma.rotmat_to_unitquat(R)
-        delta_pose = SE3(torch.cat([t, q_xyzw]))
+        composed: SE3 | None = None
+        conf = 1.0
+        for i in range(lo, hi):
+            step = self._step_se3(i)
+            composed = step if composed is None else composed * step
+            conf = min(conf, self._confidence(self.residuals[i]))
+        return composed, conf
 
-        return delta_pose, self._confidence(self.residuals[i])
+    def get_delta(self, frame_idx):
+        # A single-frame prior is the zero-drop keyframe gap (t-1 -> t), so the
+        # K == N path and the keyframing path share one composition routine.
+        return self.get_composed_delta(frame_idx - 1, frame_idx)
