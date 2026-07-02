@@ -44,6 +44,10 @@ class DroidFrontend:
 
         self.imu_delta_pose = None
         self.imu_confidence = 0.0
+        # Confidence-weighted blending of the IMU prior toward the fallback
+        # prediction. False (default) = legacy behavior: full trust in the
+        # prior once confidence > 0.1.
+        self.imu_blend = bool(getattr(args, "imu_blend", False))
 
     def _init_next_state(self):
         # DEBUG: count init_next_state invocations.
@@ -60,25 +64,36 @@ class DroidFrontend:
             and self.t1 >= 1
         )
 
+        poses = SE3(self.video.poses)
+        # Fallback prediction (used on its own without the IMU prior, and as
+        # the blend target with it): damped velocity when two poses exist,
+        # else constant pose.
+        if self.motion_damping >= 0 and self.t1 >= 2:
+            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore
+            fallback = SE3.exp(self.motion_damping * vel) * poses[self.t1 - 1]
+        else:
+            fallback = poses[self.t1 - 1]
+
         if use_imu:
             # DEBUG: count IMU branch hits.
             self._imu_hits = getattr(self, "_imu_hits", 0) + 1
 
-            poses = SE3(self.video.poses)
             delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
             # IAAI stores the delta with inverse-frame convention relative to
             # DROID (the rotation matrix expresses pose[t-1] in frame t, not
             # frame t in frame t-1). Invert before forward-composing.
-            next_pose = delta.inv() * poses[self.t1 - 1]
-            self.video.poses[self.t1] = next_pose.data
-        elif self.motion_damping >= 0 and self.t1 >= 2:
-            poses = SE3(self.video.poses)
-            vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore
-            damped_vel = self.motion_damping * vel
-            next_pose = SE3.exp(damped_vel) * poses[self.t1 - 1]
+            imu_pred = delta.inv() * poses[self.t1 - 1]
+            if self.imu_blend:
+                # Confidence-weighted geodesic blend: conf=1 -> pure IMU
+                # prediction, conf->0 -> fallback. xi is the tangent-space
+                # difference between the two predictions.
+                xi = (imu_pred * fallback.inv()).log()  # type: ignore
+                next_pose = SE3.exp(self.imu_confidence * xi) * fallback
+            else:
+                next_pose = imu_pred
             self.video.poses[self.t1] = next_pose.data  # type: ignore
         else:
-            self.video.poses[self.t1] = self.video.poses[self.t1 - 1]
+            self.video.poses[self.t1] = fallback.data  # type: ignore
 
         # Consume the stashed prior to prevent stale reuse on the next call.
         self.imu_delta_pose = None
