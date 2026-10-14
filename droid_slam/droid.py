@@ -77,11 +77,7 @@ class Droid:
         imu_confidence: float in [0, 1]. <0.1 disables the prior for this frame.
         """
         with torch.no_grad():
-            # Stash IMU delta on the frontend so _init_next_state can read it.
-            self.frontend.imu_delta_pose = imu_delta_pose
-            self.frontend.imu_confidence = imu_confidence
-
-            # DEBUG: count IMU stash calls.
+            # DEBUG: count IMU calls.
             if not hasattr(self, "_imu_stats"):
                 self._imu_stats = {"n_calls": 0, "n_usable": 0}
             self._imu_stats["n_calls"] += 1
@@ -94,6 +90,9 @@ class Droid:
             self.filterx.track(tstamp, image, depth, intrinsics)
             torch.cuda.synchronize()
             self.timing.stop("motion_filter")
+
+            # Start this frame from the IMU step t-1 -> t, which describes it.
+            self.frontend.apply_prior(imu_delta_pose, imu_confidence)
 
             # local bundle adjustment
             torch.cuda.synchronize()

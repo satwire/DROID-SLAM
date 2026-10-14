@@ -42,62 +42,66 @@ class DroidFrontend:
         if hasattr(args, "motion_damping"):
             self.motion_damping = args.motion_damping
 
-        self.imu_delta_pose = None
-        self.imu_confidence = 0.0
-        # Confidence-weighted blending of the IMU prior toward the fallback
-        # prediction. False (default) = legacy behavior: full trust in the
-        # prior once confidence > 0.1.
+        # Confidence-weighted blending of the IMU prior toward the motion
+        # model's guess. False (default): full trust in the prior once its
+        # confidence is above 0.1.
         self.imu_blend = bool(getattr(args, "imu_blend", False))
+        # Frames whose start pose came from the prior (for checking a run).
+        self.prior_applied = 0
 
     def _init_next_state(self):
-        # DEBUG: count init_next_state invocations.
-        self._init_calls = getattr(self, "_init_calls", 0) + 1
+        """Motion-model guess for the next slot, before its frame arrives.
 
+        With motion_damping = 0 (the default, as in upstream DROID) this copies
+        the previous pose. An IMU prior for the frame is applied later, by
+        apply_prior, once the frame is in the video.
+        """
         self.video.disps[self.t1] = torch.quantile(
             self.video.disps[self.t1 - 3 : self.t1 - 1], 0.5
         )
 
-        # Pose prediction. Priority: IMU prior > damped velocity > constant pose.
-        use_imu = (
-            self.imu_delta_pose is not None
-            and self.imu_confidence > 0.1
-            and self.t1 >= 1
-        )
-
         poses = SE3(self.video.poses)
-        # Fallback prediction (used on its own without the IMU prior, and as
-        # the blend target with it): damped velocity when two poses exist,
-        # else constant pose.
         if self.motion_damping >= 0 and self.t1 >= 2:
             vel = (poses[self.t1 - 1] * poses[self.t1 - 2].inv()).log()  # type: ignore
-            fallback = SE3.exp(self.motion_damping * vel) * poses[self.t1 - 1]
+            guess = SE3.exp(self.motion_damping * vel) * poses[self.t1 - 1]
         else:
-            fallback = poses[self.t1 - 1]
+            guess = poses[self.t1 - 1]
+        self.video.poses[self.t1] = guess.data  # type: ignore
 
-        if use_imu:
-            # DEBUG: count IMU branch hits.
-            self._imu_hits = getattr(self, "_imu_hits", 0) + 1
+    def apply_prior(self, delta, confidence):
+        """Start the frame just appended (slot t1) from the IMU step ending at it.
 
-            delta = self.imu_delta_pose.to(self.video.poses.device)  # type: ignore
-            # IAAI stores the delta with inverse-frame convention relative to
-            # DROID (the rotation matrix expresses pose[t-1] in frame t, not
-            # frame t in frame t-1). Invert before forward-composing.
-            imu_pred = delta.inv() * poses[self.t1 - 1]
-            if self.imu_blend:
-                # Confidence-weighted geodesic blend: conf=1 -> pure IMU
-                # prediction, conf->0 -> fallback. xi is the tangent-space
-                # difference between the two predictions.
-                xi = (imu_pred * fallback.inv()).log()  # type: ignore
-                next_pose = SE3.exp(self.imu_confidence * xi) * fallback
-            else:
-                next_pose = imu_pred
-            self.video.poses[self.t1] = next_pose.data  # type: ignore
-        else:
-            self.video.poses[self.t1] = fallback.data  # type: ignore
-
-        # Consume the stashed prior to prevent stale reuse on the next call.
-        self.imu_delta_pose = None
-        self.imu_confidence = 0.0
+        `delta` is the relative pose from the previous frame to this one, so the
+        prior initializes the same step it describes. It replaces the motion
+        model's guess that _init_next_state left in slot t1; with imu_blend it
+        is blended toward that guess by the confidence instead. Droid.track
+        calls this after the motion filter and before the update. Nothing
+        happens if the filter dropped the frame, before initialization (the
+        warmup frames start from identity, as in DROID), or when the
+        confidence is 0.1 or lower.
+        """
+        if (
+            delta is None
+            or confidence <= 0.1
+            or not self.is_initialized
+            or self.video.counter.value != self.t1 + 1
+        ):
+            return
+        t0 = time.perf_counter()
+        poses = SE3(self.video.poses)
+        # The stored poses are world-to-camera, so delta.inv() on the left moves
+        # the camera by delta in its own frame (the opposite composition about
+        # doubles the rotation error against ground truth).
+        prior = delta.to(self.video.poses.device).inv() * poses[self.t1 - 1]
+        if self.imu_blend:
+            # Geodesic blend: confidence 1 gives the prior, 0 the motion model.
+            guess = poses[self.t1]
+            xi = (prior * guess.inv()).log()  # type: ignore
+            prior = SE3.exp(confidence * xi) * guess
+        self.video.poses[self.t1] = prior.data  # type: ignore
+        self.prior_applied += 1
+        if self.timing is not None:
+            self.timing.record("frontend_apply_prior", time.perf_counter() - t0)
 
     def _update(self):
         """add edges, perform update"""
